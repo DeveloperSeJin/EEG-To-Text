@@ -261,8 +261,11 @@ if __name__ == '__main__':
 
     task_name = training_config['task_name']
     model_name = training_config['model_name']
-    
-
+    if not os.path.exists('./results'):
+        os.makedirs('./results')
+    if not os.path.exists('./score_results'):
+        os.makedirs('./score_results')
+        
     if test_input == 'EEG' and train_input=='EEG':
         print("EEG and EEG")
         # output_all_results_path = f'./results/{task_name}-{model_name}-all_decoding_results.txt'
