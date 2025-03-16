@@ -137,7 +137,8 @@ for file in tqdm(os.listdir(rootdir)):
                         else:
                             # print('no fixation: ', data_dict['content'])
                             word_tokens_with_mask.append('[MASK]')
-                            sent_obj['word'].append(None)
+                            word_obj['word_level_EEG'] = None
+                            sent_obj['word'].append(word_obj)
                             # continue
 
                         

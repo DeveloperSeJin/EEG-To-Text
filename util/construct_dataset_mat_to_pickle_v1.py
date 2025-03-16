@@ -114,14 +114,17 @@ for mat_file in tqdm(mat_files):
                         word_tokens_with_mask.append(word.content)
                     else:
                         word_tokens_with_mask.append('[MASK]')
-                        sent_obj['word'].append(None)
+                        word_obj['word_level_EEG'] = None
+                        sent_obj['word'].append(word_obj)
                         # if a word has no fixation, use sentence level feature
                         # word_obj['word_level_EEG'] = {'FFD':{'FFD_t1':sent.mean_t1, 'FFD_t2':sent.mean_t2, 'FFD_a1':sent.mean_a1, 'FFD_a2':sent.mean_a2, 'FFD_b1':sent.mean_b1, 'FFD_b2':sent.mean_b2, 'FFD_g1':sent.mean_g1, 'FFD_g2':sent.mean_g2}}
                         # word_obj['word_level_EEG']['TRT'] = {'TRT_t1':sent.mean_t1, 'TRT_t2':sent.mean_t2, 'TRT_a1':sent.mean_a1, 'TRT_a2':sent.mean_a2, 'TRT_b1':sent.mean_b1, 'TRT_b2':sent.mean_b2, 'TRT_g1':sent.mean_g1, 'TRT_g2':sent.mean_g2}
                         
                         # NOTE:if a word has no fixation, simply skip it
                         # continue
-            
+                else:
+                    word_obj['word_level_EEG'] = None
+                    sent_obj['word'].append(word_obj)
             sent_obj['word_tokens_has_fixation'] = word_tokens_has_fixation
             sent_obj['word_tokens_with_mask'] = word_tokens_with_mask
             sent_obj['word_tokens_all'] = word_tokens_all

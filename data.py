@@ -160,14 +160,17 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
 def get_raw_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], max_len = 56, add_CLS_token = False, test_input="EEG"):
     
     def get_word_raw_tensor(word_obj, eeg_type, bands, rawEEG):
-        frequency_features = []
+        frequency_features = [rawEEG]
+        if word_obj is None:
+            frequency_features.append(np.zeros(105*len(bands)))
+            word_eeg_embedding = np.concatenate(frequency_features)
+        else:
+            for band in bands:
+                frequency_features.append(word_obj['word_level_EEG'][eeg_type][eeg_type+band])
+            word_eeg_embedding = np.concatenate(frequency_features)
 
-        for band in bands:
-            frequency_features.append(word_obj['word_level_EEG'][eeg_type][eeg_type+band])
-        word_eeg_embedding = np.concatenate(frequency_features)
-
-        if len(word_eeg_embedding) != 105*len(bands):
-            print(f'expect word eeg embedding dim to be {105*len(bands)}, but got {len(word_eeg_embedding)}, return None')
+        if len(word_eeg_embedding) != 105*len(bands)+ len(rawEEG):
+            print(f'expect word eeg embedding dim to be {105*len(bands)+len(rawEEG)}, but got {len(word_eeg_embedding)}, return None')
             return None
         
         # assert len(word_eeg_embedding) == 105*len(bands)
@@ -239,7 +242,7 @@ def get_raw_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_
 
     """add CLS token embedding at the front"""
     if add_CLS_token:
-        word_embeddings.append(torch.ones(105*len(bands)))
+        word_embeddings.append(torch.ones(105*len(bands)+ 100))
 
     print('target_string:', target_string)
     for idx, word in enumerate(sent_obj['word_tokens_all']):
@@ -257,7 +260,7 @@ def get_raw_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_
 
     # pad to max_len
     while len(word_embeddings) < max_len:
-        word_embeddings.append(torch.zeros(105*len(bands)))
+        word_embeddings.append(torch.zeros(105*len(bands)+ 100))
 
     if test_input=='noise':
         rand_eeg= torch.randn(torch.stack(word_embeddings).size())
