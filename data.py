@@ -75,6 +75,24 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
     #     return None
     
     input_sample['sent_level_EEG'] = sent_level_eeg_tensor
+    window = 100   # 200ms
+    stride = 50    # 100ms overlap
+    segments = []
+    num_segments = 56
+
+    for i in range(num_segments):
+        start = i * stride
+        end   = start + window
+        # 각 chunk는 shape이 [C, window]가 됨
+        chunk = sent_obj['rawData'][:, start:end]  # x가 [C, total_time] 이므로
+        segments.append(chunk)
+
+    # segments 리스트에 [C, window] 짜리 조각들이 56개 쌓임
+    # 이를 한 번에 합치면 [num_segments, C, window] => [56, 105, 100] (예시)
+    x = np.stack(segments, axis=0)
+    x = np.mean(x, axis = 1)
+
+    input_sample['rawEEG'] = x
     #input_sample['sent_level_EEG'] = torch.randn(sent_level_eeg_tensor.size()) # random input code
     #print("NOISE:", input_sample['sent_level_EEG'])
 
@@ -98,22 +116,25 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
     if add_CLS_token:
         word_embeddings.append(torch.ones(105*len(bands)))
 
+    if len(sent_obj['word_tokens_all']) > max_len:
+        return None
     for word in sent_obj['word']:
-        # add each word's EEG embedding as Tensors
-        word_level_eeg_tensor = get_word_embedding_eeg_tensor(word, eeg_type, bands = bands)
-        # check none, for v2 dataset
-        if word_level_eeg_tensor is None:
-            return None
-        # check nan:
-        if torch.isnan(word_level_eeg_tensor).any():
-            # print()
-            # print('[NaN ERROR] problem sent:',sent_obj['content'])
-            # print('[NaN ERROR] problem word:',word['content'])
-            # print('[NaN ERROR] problem word feature:',word_level_eeg_tensor)
-            # print()
-            return None
-        
-        word_embeddings.append(word_level_eeg_tensor)
+        if word['word_level_EEG'] is not None:
+            # add each word's EEG embedding as Tensors
+            word_level_eeg_tensor = get_word_embedding_eeg_tensor(word, eeg_type, bands = bands)
+            # check none, for v2 dataset
+            if word_level_eeg_tensor is None:
+                return None
+            # check nan:
+            if torch.isnan(word_level_eeg_tensor).any():
+                # print()
+                # print('[NaN ERROR] problem sent:',sent_obj['content'])
+                # print('[NaN ERROR] problem word:',word['content'])
+                # print('[NaN ERROR] problem word feature:',word_level_eeg_tensor)
+                # print()
+                return None
+            
+            word_embeddings.append(word_level_eeg_tensor)
 
     # pad to max_len
     while len(word_embeddings) < max_len:
@@ -127,7 +148,7 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
 
     else:
         input_sample['input_embeddings'] = torch.stack(word_embeddings) # max_len * (105*num_bands)
-        print("EEG", input_sample['input_embeddings'])
+        # print("EEG", input_sample['input_embeddings'])
     
     # mask out padding tokens
     input_sample['input_attn_mask'] = torch.zeros(max_len) # 0 is masked out
@@ -160,22 +181,28 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
 def get_raw_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], max_len = 56, add_CLS_token = False, test_input="EEG"):
     
     def get_word_raw_tensor(word_obj, eeg_type, bands, rawEEG):
-        frequency_features = [rawEEG]
-        if word_obj is None:
-            frequency_features.append(np.zeros(105*len(bands)))
-            word_eeg_embedding = np.concatenate(frequency_features)
+        rawEEG_tensor = normalize_1d(torch.from_numpy(rawEEG)).numpy()
+        
+
+        if word_obj['word_level_EEG'] is None:
+            frequency_features = np.zeros(105*len(bands))
+            
         else:
+            frequency_features = []
             for band in bands:
                 frequency_features.append(word_obj['word_level_EEG'][eeg_type][eeg_type+band])
-            word_eeg_embedding = np.concatenate(frequency_features)
+            frequency_features = np.concatenate(frequency_features)
+            frequency_features = normalize_1d(torch.from_numpy(frequency_features)).numpy()
+
+        word_eeg_embedding = np.concatenate([rawEEG_tensor, frequency_features])
 
         if len(word_eeg_embedding) != 105*len(bands)+ len(rawEEG):
             print(f'expect word eeg embedding dim to be {105*len(bands)+len(rawEEG)}, but got {len(word_eeg_embedding)}, return None')
             return None
         
         # assert len(word_eeg_embedding) == 105*len(bands)
-        return_tensor = torch.from_numpy(word_eeg_embedding)
-        return normalize_1d(return_tensor)
+        
+        return torch.from_numpy(word_eeg_embedding)
 
     def get_sent_eeg(sent_obj, bands):
         sent_eeg_features = []
@@ -244,9 +271,11 @@ def get_raw_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_
     if add_CLS_token:
         word_embeddings.append(torch.ones(105*len(bands)+ 100))
 
-    print('target_string:', target_string)
-    for idx, word in enumerate(sent_obj['word_tokens_all']):
-        print('word: ', word['content'])
+    # print('target_string:', target_string)
+    if len(sent_obj['word_tokens_all']) > max_len:
+        return None
+    for idx, word in enumerate(sent_obj['word']):
+        # print('word: ', word['content'])
         # add each word's EEG embedding as Tensors
         word_level_eeg_tensor = get_word_raw_tensor(word, eeg_type, bands = bands, rawEEG = input_sample['rawEEG'][idx])
         # check none, for v2 dataset
@@ -273,21 +302,29 @@ def get_raw_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_
         # print("EEG", input_sample['input_embeddings'])
     
     # mask out padding tokens
-    input_sample['input_attn_mask'] = torch.zeros(max_len) # 0 is masked out
+    input_sample['input_attn_mask'] = torch.ones(max_len) # 0 is masked out
+    zero_index = [i for i, x in enumerate(input_sample['input_embeddings']) if input_sample['input_embeddings'][i].sum() == 0 and input_sample['input_embeddings'][i][0] == 0]
 
     if add_CLS_token:
-        input_sample['input_attn_mask'][:len(sent_obj['word'])+1] = torch.ones(len(sent_obj['word'])+1) # 1 is not masked
+        # input_sample['input_attn_mask'][:len(sent_obj['word'])+1] = torch.ones(len(sent_obj['word'])+1) # 1 is not masked
+        adjusted_index = [i + 1 for i in zero_index]
+        input_sample['input_attn_mask'][adjusted_index] = 0
+
     else:
-        input_sample['input_attn_mask'][:len(sent_obj['word'])] = torch.ones(len(sent_obj['word'])) # 1 is not masked
+        # input_sample['input_attn_mask'][:len(sent_obj['word'])] = torch.ones(len(sent_obj['word'])) # 1 is not masked
+        input_sample['input_attn_mask'][zero_index] = 0
     
 
     # mask out padding tokens reverted: handle different use case: this is for pytorch transformers
-    input_sample['input_attn_mask_invert'] = torch.ones(max_len) # 1 is masked out
+    input_sample['input_attn_mask_invert'] = torch.zeros(max_len) # 1 is masked out
 
     if add_CLS_token:
-        input_sample['input_attn_mask_invert'][:len(sent_obj['word'])+1] = torch.zeros(len(sent_obj['word'])+1) # 0 is not masked
+        # input_sample['input_attn_mask_invert'][:len(sent_obj['word'])+1] = torch.zeros(len(sent_obj['word'])+1) # 0 is not masked
+        adjusted_index = [i + 1 for i in zero_index]
+        input_sample['input_attn_mask_invert'][adjusted_index] = 1
     else:
-        input_sample['input_attn_mask_invert'][:len(sent_obj['word'])] = torch.zeros(len(sent_obj['word'])) # 0 is not masked
+        # input_sample['input_attn_mask_invert'][:len(sent_obj['word'])] = torch.zeros(len(sent_obj['word'])) # 0 is not masked
+        input_sample['input_attn_mask_invert'][zero_index] = 1
 
     # mask out target padding for computing cross entropy loss
     input_sample['target_mask'] = target_tokenized['attention_mask'][0]
@@ -325,56 +362,107 @@ class ZuCo_dataset(Dataset):
             
             print(f'train divider = {train_divider}')
             print(f'dev divider = {dev_divider}')
+            if test_input == 'EEG':
+                if setting == 'unique_sent':
+                    # take first 80% as trainset, 10% as dev and 10% as test
+                    if phase == 'train':
+                        print('[INFO]initializing a train set...')
+                        for key in subjects:
+                            for i in range(train_divider):
+                                input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                    elif phase == 'dev':
+                        print('[INFO]initializing a dev set...')
+                        for key in subjects:
+                            for i in range(train_divider,dev_divider):
+                                input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                    elif phase == 'test':
+                        print('[INFO]initializing a test set...')
+                        for key in subjects:
+                            for i in range(dev_divider,total_num_sentence):
+                                input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                elif setting == 'unique_subj':
+                    print('WARNING!!! only implemented for SR v1 dataset ')
+                    # subject ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH', 'ZKW'] for train
+                    # subject ['ZMG'] for dev
+                    # subject ['ZPH'] for test
+                    if phase == 'train':
+                        print(f'[INFO]initializing a train set using {setting} setting...')
+                        for i in range(total_num_sentence):
+                            for key in ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH','ZKW']:
+                                input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                    if phase == 'dev':
+                        print(f'[INFO]initializing a dev set using {setting} setting...')
+                        for i in range(total_num_sentence):
+                            for key in ['ZMG']:
+                                input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                    if phase == 'test':
+                        print(f'[INFO]initializing a test set using {setting} setting...')
+                        for i in range(total_num_sentence):
+                            for key in ['ZPH']:
+                                input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+            elif test_input == 'rawEEG':
+                if setting == 'unique_sent':
+                    # take first 80% as trainset, 10% as dev and 10% as test
+                    if phase == 'train':
+                        print('[INFO]initializing a train set...')
+                        for key in subjects:
+                            for i in range(train_divider):
+                                input_sample = get_raw_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                    elif phase == 'dev':
+                        print('[INFO]initializing a dev set...')
+                        for key in subjects:
+                            for i in range(train_divider,dev_divider):
+                                input_sample = get_raw_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                    elif phase == 'test':
+                        print('[INFO]initializing a test set...')
+                        for key in subjects:
+                            for i in range(dev_divider,total_num_sentence):
+                                input_sample = get_raw_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                elif setting == 'unique_subj':
+                    print('WARNING!!! only implemented for SR v1 dataset ')
+                    # subject ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH', 'ZKW'] for train
+                    # subject ['ZMG'] for dev
+                    # subject ['ZPH'] for test
+                    if phase == 'train':
+                        print(f'[INFO]initializing a train set using {setting} setting...')
+                        for i in range(total_num_sentence):
+                            for key in ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH','ZKW']:
+                                input_sample = get_raw_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                    if phase == 'dev':
+                        print(f'[INFO]initializing a dev set using {setting} setting...')
+                        for i in range(total_num_sentence):
+                            for key in ['ZMG']:
+                                input_sample = get_raw_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
+                    if phase == 'test':
+                        print(f'[INFO]initializing a test set using {setting} setting...')
+                        for i in range(total_num_sentence):
+                            for key in ['ZPH']:
+                                input_sample = get_raw_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                                if input_sample is not None:
+                                    self.inputs.append(input_sample)
 
-            if setting == 'unique_sent':
-                # take first 80% as trainset, 10% as dev and 10% as test
-                if phase == 'train':
-                    print('[INFO]initializing a train set...')
-                    for key in subjects:
-                        for i in range(train_divider):
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
-                            if input_sample is not None:
-                                self.inputs.append(input_sample)
-                elif phase == 'dev':
-                    print('[INFO]initializing a dev set...')
-                    for key in subjects:
-                        for i in range(train_divider,dev_divider):
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
-                            if input_sample is not None:
-                                self.inputs.append(input_sample)
-                elif phase == 'test':
-                    print('[INFO]initializing a test set...')
-                    for key in subjects:
-                        for i in range(dev_divider,total_num_sentence):
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, test_input=test_input)
-                            if input_sample is not None:
-                                self.inputs.append(input_sample)
-            elif setting == 'unique_subj':
-                print('WARNING!!! only implemented for SR v1 dataset ')
-                # subject ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH', 'ZKW'] for train
-                # subject ['ZMG'] for dev
-                # subject ['ZPH'] for test
-                if phase == 'train':
-                    print(f'[INFO]initializing a train set using {setting} setting...')
-                    for i in range(total_num_sentence):
-                        for key in ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH','ZKW']:
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
-                            if input_sample is not None:
-                                self.inputs.append(input_sample)
-                if phase == 'dev':
-                    print(f'[INFO]initializing a dev set using {setting} setting...')
-                    for i in range(total_num_sentence):
-                        for key in ['ZMG']:
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
-                            if input_sample is not None:
-                                self.inputs.append(input_sample)
-                if phase == 'test':
-                    print(f'[INFO]initializing a test set using {setting} setting...')
-                    for i in range(total_num_sentence):
-                        for key in ['ZPH']:
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
-                            if input_sample is not None:
-                                self.inputs.append(input_sample)
             print('++ adding task to dataset, now we have:', len(self.inputs))
 
         print('[INFO]input tensor size:', self.inputs[0]['input_embeddings'].size())

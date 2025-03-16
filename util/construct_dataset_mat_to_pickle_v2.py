@@ -33,7 +33,8 @@ def clip_or_pad_eeg(eeg_data, target_length=5500):
 
 task = "NR"
 
-rootdir = "/home/saul_park/workspace/data/ZuCov2/task1 - NR/Matlab files/"
+# rootdir = "/home/saul_park/workspace/data/ZuCov2/task1 - NR/Matlab files/"
+rootdir = "../ZuCo/task1-NRv2/"
 
 print('##############################')
 print(f'start processing ZuCo task2-NR-2.0...')

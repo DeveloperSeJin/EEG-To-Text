@@ -50,9 +50,12 @@ print('##############################')
 print(f'start processing ZuCo {task_name}...')
 
 
+# if version == 'v1':
+#     # old version 
+#     input_mat_files_dir = f'/home/saul_park/workspace/data/ZuCo2018/{task_name}/Matlab files/' 
 if version == 'v1':
     # old version 
-    input_mat_files_dir = f'/home/saul_park/workspace/data/ZuCo2018/{task_name}/Matlab files/' 
+    input_mat_files_dir = f'../ZuCo/{task_name}/' 
 elif version == 'v2':
     # new version, mat73 
     input_mat_files_dir = f'/home/saul_park/workspace/data/ZuCo2019/{task_name}/Matlab files/' 
