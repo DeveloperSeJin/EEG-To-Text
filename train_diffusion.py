@@ -14,7 +14,7 @@ from data import ZuCo_dataset
 from model_decoding import LDMTranslator
 from config import get_config
 from eval_decoding import eval_model
-import wandb
+# import wandb
 from ldm.autoencoder import AutoencoderKL
 
 def train_model(dataloaders, device, model, optimizer, scheduler, num_epochs=25, checkpoint_path_best = './checkpoints/decoding/best/temp_decoding.pt', checkpoint_path_last = './checkpoints/decoding/last/temp_decoding.pt', stage = None):
@@ -86,9 +86,9 @@ def train_model(dataloaders, device, model, optimizer, scheduler, num_epochs=25,
 
             epoch_loss = running_loss / dataset_sizes[phase]
 
-            wandb.log({
-                f'{phase}_loss':epoch_loss,
-            }, step=epoch)
+#            wandb.log({
+#                f'{phase}_loss':epoch_loss,
+#            }, step=epoch)
 
             print('{} Loss: {:.4f}'.format(phase, epoch_loss))
             
@@ -120,7 +120,7 @@ def show_require_grad_layers(model):
             print(' ', name)
 
 if __name__ == '__main__':
-    args = get_config('train_decoding')
+    args = get_config('train_diffusion')
 
     ''' config param'''
     dataset_setting = 'unique_sent'
@@ -206,11 +206,11 @@ if __name__ == '__main__':
     ''' set up dataloader '''
     whole_dataset_dicts = []
     if 'task1' in task_name:
-        dataset_path_task1 = '/home/saul_park/workspace/code/EEG-Diffusion/dataset/ZuCo/task1- SR/pickle/task1- SR-dataset.pickle'
+        dataset_path_task1 = '../dataset/ZuCo/task1-SR/pickle/task1-SR-dataset.pickle'
         with open(dataset_path_task1, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'task2' in task_name:
-        dataset_path_task2 = '/home/saul_park/workspace/code/EEG-Diffusion/dataset/ZuCo/task2 - NR/pickle/task2 - NR-dataset.pickle'
+        dataset_path_task2 = '../dataset/ZuCo/task2-NR/pickle/task2-NR-dataset.pickle'
         with open(dataset_path_task2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'task3' in task_name:
@@ -218,7 +218,7 @@ if __name__ == '__main__':
         with open(dataset_path_task3, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'taskNRv2' in task_name:
-        dataset_path_taskNRv2 = '/home/saul_park/workspace/code/EEG-Diffusion/dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle'
+        dataset_path_taskNRv2 = '../dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle'
         with open(dataset_path_taskNRv2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
 
@@ -284,8 +284,15 @@ if __name__ == '__main__':
     ).to(device)
     state_dict = torch.load(checkpoint_path)
     pretrained_autoencoder.load_state_dict(state_dict)
+    
+    if train_input == 'rawEEG':
+        in_feature = 105*len(bands_choice) + 100
+        additional_encoder_nhead=10
+    else:
+        in_feature = 105*len(bands_choice)
+        additional_encoder_nhead=8
 
-    model = LDMTranslator(pretrained, in_feature = 105*len(bands_choice), decoder_embedding_size = 1024, additional_encoder_nhead=8, additional_encoder_dim_feedforward = 2048,device = device, pretrained_autoencoder = pretrained_autoencoder)
+    model = LDMTranslator(pretrained, in_feature = in_feature, decoder_embedding_size = 1024, additional_encoder_nhead=additional_encoder_nhead, additional_encoder_dim_feedforward = 2048,device = device, pretrained_autoencoder = pretrained_autoencoder)
 
     model.to(device)
     
@@ -313,10 +320,10 @@ if __name__ == '__main__':
         optimizer_step1 = optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=step1_lr, momentum=0.9)
         exp_lr_scheduler_step1 = lr_scheduler.StepLR(optimizer_step1, step_size=20, gamma=0.1)
         # return best loss model from step1 training
-        wandb.init(project='EEG-Diffusion-beta v0.4', name = 'first_stage'+save_name)
+        # wandb.init(project='EEG-Diffusion-beta v0.4', name = 'first_stage'+save_name)
         _, model = train_model(dataloaders, device, model, optimizer_step1, exp_lr_scheduler_step1, num_epochs=num_epochs_step1, 
                             checkpoint_path_best = output_checkpoint_name_best, checkpoint_path_last = output_checkpoint_name_last, stage = 'first_stage')
-        wandb.finish()
+        # wandb.finish()
     ######################################################
     '''step two trainig: update whole model for a few iterations'''
     ######################################################
@@ -333,10 +340,10 @@ if __name__ == '__main__':
     show_require_grad_layers(model)
     
     '''main loop'''
-    wandb.init(project='EEG-Diffusion-beta v0.4', name = 'second_stage'+save_name)
+    # wandb.init(project='EEG-Diffusion-beta v0.4', name = 'second_stage'+save_name)
     best_wts, last_model = train_model(dataloaders, device, model, optimizer_step2, exp_lr_scheduler_step2, num_epochs=num_epochs_step2, 
                                        checkpoint_path_best = output_checkpoint_name_best, checkpoint_path_last = output_checkpoint_name_last, stage = 'second_stage')
-    wandb.finish()
+    # wandb.finish()
     eval_model(dataloaders, device, tokenizer, last_model, output_all_results_path = f'./results/last_{save_name}.txt' , score_results=f'./score_results/last_{save_name}.txt')
 
     best_model = LDMTranslator(pretrained, in_feature = 105*len(bands_choice), decoder_embedding_size = 1024, additional_encoder_nhead=8, additional_encoder_dim_feedforward = 2048,device = device, pretrained_autoencoder = pretrained_autoencoder)

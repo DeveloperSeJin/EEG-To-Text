@@ -7,11 +7,63 @@ from ldm.diffusion_module import register_schedule
 from ldm.util import q_sample, extract_into_tensor
 from ldm.openaimodel import UNetModel
 
+class ContrastiveLatentLoss(nn.Module):
+    def __init__(self, temperature=0.07, proj_dim = 256):
+        """
+        Contrastive loss for aligning EEG Condition with Text Latent in Latent Diffusion Model (LDM).
+        """
+        super(ContrastiveLatentLoss, self).__init__()
+        self.temperature = temperature
+        self.proj_text = nn.Linear(64, proj_dim)
+        self.proj_eeg = nn.Linear(1024, proj_dim) 
+
+    def forward(self, text_latent, eeg_condition):
+        """
+        Args:
+            text_latent (torch.Tensor): Latent representation of text (batch_size, latent_dim)
+            eeg_condition (torch.Tensor): EEG-based Condition Vector (batch_size, latent_dim)
+        
+        Returns:
+            torch.Tensor: Contrastive loss value
+        """
+        text_latent = text_latent.mean(dim=1)
+        eeg_condition = eeg_condition.mean(dim=1)
+
+        text_latent = self.proj_text(text_latent)
+        eeg_condition = self.proj_eeg(eeg_condition)
+        # Normalize embeddings (Cosine Similarity 형태로 만들기)
+        text_latent = F.normalize(text_latent, dim=-1)
+        eeg_condition = F.normalize(eeg_condition, dim=-1)
+      
+#        print('text_latent', text_latent.shape)
+#        print('eeg_condition', eeg_condition.shape)
+
+        # 유사도 행렬 계산 (batch_size, batch_size)
+        similarity_matrix = torch.matmul(text_latent, eeg_condition.T)  
+
+        # 대각선 값(Positive Pair) 추출
+        batch_size = text_latent.shape[0]
+        positive_sim = torch.diag(similarity_matrix)  # (batch_size,)
+
+        # 모든 Negative Pair 포함한 Softmax 확률 계산
+        logits = similarity_matrix / self.temperature
+        exp_logits = torch.exp(logits)  # (batch_size, batch_size)
+      
+        # Create mask to remove diagonal (Positive Pairs)
+        mask = torch.eye(batch_size, device=text_latent.device)  # Identity matrix
+        neg_sum = (exp_logits * (1 - mask)).sum(dim=1)  # Sum only over Negative Pairs
+
+        # Contrastive Loss (InfoNCE Loss)
+        loss = -torch.log(torch.exp(positive_sim / self.temperature) / (neg_sum + torch.exp(positive_sim / self.temperature)))
+
+        return loss
 
 class LDMTranslator(nn.Module):
     def __init__(self, pretrained_layers, in_feature=840, decoder_embedding_size=1024, 
                  additional_encoder_nhead=8, additional_encoder_dim_feedforward=2048, latent_dim=1024, device = 'cuda', pretrained_autoencoder = None):
         super(LDMTranslator, self).__init__()
+
+        self.contrastive_learning = ContrastiveLatentLoss()
         self.unet = UNetModel(
             image_size=850,
             dims = 1, 
@@ -158,6 +210,7 @@ class LDMTranslator(nn.Module):
         if stage == 'first_stage':
             loss = F.mse_loss(predicted_noise, noise)
         elif stage == 'second_stage':
+            out.loss + self.contrastive_learning(z, condition)
             loss = out.loss
 
         return out, loss
@@ -188,17 +241,15 @@ class Rater(nn.Module):
     def __init__(self, in_feature=840, additional_encoder_nhead=8, 
                  additional_encoder_dim_feedforward=2048, vocab_size = 100):
         
-        self.embedding_layer = nn.Embedding(vocab_size, in_feature)
+        super(Rater, self).__init__()
         self.additional_encoder_layer = nn.TransformerEncoderLayer(
-            d_model=in_feature, nhead=additional_encoder_nhead, 
+            d_model=56, nhead=additional_encoder_nhead, 
             dim_feedforward=additional_encoder_dim_feedforward, batch_first=True
         )
         self.additional_encoder = nn.TransformerEncoder(self.additional_encoder_layer, num_layers=6)
-        self.fc1 = nn.Linear(1024, 1)
+        self.fc1 = nn.Linear(56, 1)
 
     def forward(self, x):
-        
-        embedding_inputs = self.embedding_layer(x)
-        encoded_output = self.additional_encoder(embedding_inputs)
+        encoded_output = self.additional_encoder(x)
         out = self.fc1(encoded_output)
         return out

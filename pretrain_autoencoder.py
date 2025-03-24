@@ -52,11 +52,10 @@ def train_autoencoder(dataloaders, device, model, pretrained, optimizer, schedul
                 # forward
     	        # track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
-                    
                     output, _ = model(context)
                     text_embeddings = F.relu(output)
                     out = pretrained(inputs_embeds = text_embeddings, attention_mask = input_masks_batch,
-                                        return_dict = True, labels = input_mask_invert_batch)
+                                        return_dict = True, labels = target_ids_batch)
 
                     loss = out.loss
                     """calculate loss"""
@@ -179,19 +178,19 @@ if __name__ == '__main__':
     ''' set up dataloader '''
     whole_dataset_dicts = []
     if 'task1' in task_name:
-        dataset_path_task1 = '/home/saul_park/workspace/code/EEG-Diffusion/dataset/ZuCo/task1- SR/pickle/task1- SR-dataset.pickle'
+        dataset_path_task1 = '../dataset/ZuCo/task1-SR/pickle/task1-SR-dataset.pickle'
         with open(dataset_path_task1, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'task2' in task_name:
-        dataset_path_task2 = '/home/saul_park/workspace/code/EEG-Diffusion/dataset/ZuCo/task2 - NR/pickle/task2 - NR-dataset.pickle'
+        dataset_path_task2 = '../dataset/ZuCo/task2-NR/pickle/task2-NR-dataset.pickle'
         with open(dataset_path_task2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'task3' in task_name:
-        dataset_path_task3 = '/home/saul_park/workspace/code/EEG-Diffusion/dataset/ZuCo/task3-TSR/pickle/task3-TSR-dataset.pickle'
+        dataset_path_task3 = '../dataset/ZuCo/task3-TSR/pickle/task3-TSR-dataset.pickle'
         with open(dataset_path_task3, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'taskNRv2' in task_name:
-        dataset_path_taskNRv2 = '/home/saul_park/workspace/code/EEG-Diffusion/dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle'
+        dataset_path_taskNRv2 = '../dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle'
         with open(dataset_path_taskNRv2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
 
@@ -230,7 +229,7 @@ if __name__ == '__main__':
     # dataloaders
     dataloaders = {'train':train_dataloader, 'dev':val_dataloader, 'test':test_dataloader}
 
-    pretrained = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
+    pretrained = BartForConditionalGeneration.from_pretrained('facebook/bart-large').to(device)
 
     vocab_size = tokenizer.vocab_size
     autoencoder = AutoencoderKL(
@@ -255,8 +254,6 @@ if __name__ == '__main__':
         latent_dim=1024
     ).to(device)
 
-    autoencoder.to(device)
-    
     ''' training loop '''
 
     ''' set up optimizer and scheduler'''

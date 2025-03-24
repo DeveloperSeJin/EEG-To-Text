@@ -22,6 +22,7 @@ from rouge import Rouge
 from config import get_config
 import evaluate
 from evaluate import load
+from ldm.autoencoder import AutoencoderKL
 
 metric = evaluate.load("sacrebleu")
 cer_metric = load("cer")
@@ -301,11 +302,11 @@ if __name__ == '__main__':
     ''' set up dataloader '''
     whole_dataset_dicts = []
     if 'task1' in task_name:
-        dataset_path_task1 = './dataset/ZuCo/task1- SR/pickle/task1- SR-dataset.pickle'
+        dataset_path_task1 = '../dataset/ZuCo/task1-SR/pickle/task1-SR-dataset.pickle'
         with open(dataset_path_task1, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'task2' in task_name:
-        dataset_path_task2 = './dataset/ZuCo/task2 - NR/pickle/task2 - NR-dataset.pickle'
+        dataset_path_task2 = '../dataset/ZuCo/task2-NR/pickle/task2-NR-dataset.pickle'
         with open(dataset_path_task2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'task3' in task_name:
@@ -313,7 +314,7 @@ if __name__ == '__main__':
         with open(dataset_path_task3, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'taskNRv2' in task_name:
-        dataset_path_taskNRv2 = './dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle'
+        dataset_path_taskNRv2 = '../dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle'
         with open(dataset_path_taskNRv2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
 
@@ -347,7 +348,35 @@ if __name__ == '__main__':
     pretrained_bart = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
 
     vocab_size = tokenizer.vocab_size
-    model = LDMTranslator(pretrained_bart, in_feature = 105*len(bands_choice), decoder_embedding_size = 1024, additional_encoder_nhead=8, additional_encoder_dim_feedforward = 2048,device = device, vocab_size = vocab_size)
+    pretrained_autoencoder = AutoencoderKL(
+    embed_dim=56,
+        monitor="val/rec_loss",
+        ddconfig={
+            "double_z": True,
+            "z_channels": 58,
+            "resolution": 256,
+            "in_channels": 56,
+            "out_ch": 56,
+            "ch": 128,
+            "ch_mult": [1, 2, 4, 4],
+            "num_res_blocks": 2,
+            "attn_resolutions": [],
+            "dropout": 0.0
+        },
+        lossconfig={
+            "target": "torch.nn.Identity"
+        },
+        vocab_size = vocab_size,
+        latent_dim=1024
+    ).to(device)
+    if test_input == 'rawEEG':
+        in_feature=105*len(bands_choice) + 100
+        additional_encoder_nhead=10
+    else:
+        in_feature=105*len(bands_choice)
+        additional_encoder_nhead=8
+
+    model = LDMTranslator(pretrained_bart, in_feature = in_feature, decoder_embedding_size = 1024, additional_encoder_nhead=additional_encoder_nhead, additional_encoder_dim_feedforward = 2048,device = device, pretrained_autoencoder=pretrained_autoencoder)
 
     state_dict = torch.load(checkpoint_path)
     new_state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}

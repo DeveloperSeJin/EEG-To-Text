@@ -1,2 +1,5 @@
 dataset/
 dataconfirm.ipynb
+checkpoints/
+config/
+wandb/

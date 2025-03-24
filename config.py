@@ -55,6 +55,7 @@ def get_config(case):
         parser.add_argument('-train_input', '--train_input', help='add noise' ,required=True)
         parser.add_argument('-checkpoint', '--checkpoint_path', help='specify model checkpoint' ,required=True)
         args = vars(parser.parse_args())
+
     elif case == 'eval_decoding':
         # args config for evaluating EEG-To-Text decoder
         parser = argparse.ArgumentParser(description='Specify config args for evaluate EEG-To-Text decoder')
